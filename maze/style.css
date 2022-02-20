@@ -1,0 +1,29 @@
+.table {
+    display: flex;
+    flex-direction: column;
+}
+
+.row {
+    display: flex;
+}
+
+.cell {
+    width: 30px;
+    height: 30px;
+    border: 1px solid black;
+    text-align: center;
+}
+
+.cell-path {
+    background: green;
+}
+
+.cell-start, .cell-end {
+    background: red;
+    color: white;
+}
+
+.cell-roadblock {
+    background: yellow;
+    color: red;
+}
