@@ -1,5 +1,4 @@
-// This script is run after ready_to_print and gets the HTML for the current page DOM
-async function getHtmlConverter (printMedia) {
+async function convertIntoIxbrl(printMedia) {
     const REMOVED_TAG_PREFIX = 'x-cwi-';
     let removedTags = {};
     let removedAttributes = {};
@@ -55,9 +54,91 @@ async function getHtmlConverter (printMedia) {
 
         /**
          * Convert _nghost-ydt-c336 and _ngcontent-gan-c126 attributes into classes with prefixes
+         * Possible attribute placement:
+         *
+         * HOST-CONTEXT
+         *
+         * :host-context(.active-theme) {
+         *   border: 1px solid red;
+         *   .econtent {
+         *     border: 1px solid blue;
+         *   }
+         * }
+         *
+         * <div class="active-theme">
+         *  <se-econtent _nghost-uha-c336>
+         *    <div class="econtent" _ngcontent-uha-c336>
+         *
+         * .active-theme[_nghost-uha-c336] .econtent[_ngcontent-uha-c336], .active-theme [_nghost-uha-c336] .econtent[_ngcontent-uha-c336] {
+         *     border: 1px solid blue;
+         * }
+         * .active-theme[_nghost-uha-c336], .active-theme [_nghost-uha-c336] {
+         *     border: 1px solid red;
+         * }
+         *
+         * HOST-CONTEXT + HOST
+         *
+         * :host-context(.active-theme) {
+         *   :host {
+         *     background: green;
+         *   }
+         *   :host .econtent {
+         *     background: blue;
+         *   }
+         * }
+         *
+         * <div class="active-theme">
+         *    <se-econtent _nghost-ydu-c336>
+         *      <div class="econtent" _ngcontent-ydu-c336>
+         *
+         * .active-theme [_nghost-ydu-c336] {
+         *   background: green;
+         * }
+         * .active-theme [_nghost-ydu-c336] .econtent[_ngcontent-ydu-c336] {
+         *   background: blue;
+         * }
+         *
+         * TAG
+         *
+         * [_smart-tag] {
+         *   background: green;
+         * }
+         *
+         * <div _smart-tag _ngcontent-jhj-c336>
+         *
+         * [_smart-tag][_ngcontent-jhj-c336] {
+         *   background: green;
+         * }
+         *
+         * HOST + TAG
+         *
+         * :host {
+         *   [_smart-tag] {
+         *     background: green;
+         *   }
+         * }
+         *
+         * <se-content _nghost-iuo-c336>
+         *   <div _ngcontent-iuo-c336 _smart-tag>
+         *
+         * [_nghost-iuo-c336] [_smart-tag][_ngcontent-iuo-c336] {
+         *   background: green;
+         * }
+         *
+         * HOST
+         *
+         * :host {
+         *   background: green;
+         * }
+         *
+         * <se-content _nghost-oij-c336>
+         *
+         * [_nghost-oij-c336] {
+         *    background: green;
+         * }
          * @param {Element} node
          */
-        function convertNgAttributesIntoClasses(node) {
+        function convertElemNgAttrToCls(node) {
             let attributes = node.getAttributeNames();
             for (let attribute of attributes) {
                 if (attribute.startsWith('_nghost-') || attribute.startsWith('_ngcontent-')) {
@@ -136,7 +217,7 @@ async function getHtmlConverter (printMedia) {
         }
 
         if (node.nodeType === Node.ELEMENT_NODE) {
-            convertNgAttributesIntoClasses(node);
+            convertElemNgAttrToCls(node);
 
             // Remove unknown tags or tags with - characters in them
             if (node instanceof HTMLUnknownElement || node.localName.includes('-')) {
@@ -314,11 +395,11 @@ async function getHtmlConverter (printMedia) {
 
     /**
      * Takes a selector like this: '.hello[attr-1][attr-2] .world[attr_tt-c123]:not(.car)'
-     * and transforms it into '.hello.attr-1.attr-2 .world.attr_tt-c123:not(.car)'
+     * and transforms it into '.hello.x-cwi-attr-1.x-cwi-attr-2 .world.x-cwi-attr_tt-c123:not(.car)'
      * @param {string} selector
      */
     function convertSelectorAttrToCls(selector) {
-        return selector.replace(/\[((?:\w|[\-])+)\]/g, function(match, attrName) {
+        return selector.replace(/\[((?:\w|[\-])+)\]/g, function (match, attrName) {
             if (removedAttributes[attrName]) {
                 return `.${REMOVED_TAG_PREFIX}${attrName}`;
             } else {
@@ -354,6 +435,19 @@ async function getHtmlConverter (printMedia) {
         }
     }
 
+    // Accessing stylesheet.cssRules could result in a security exception due to Chrome CORS policy. Our app
+    // puts some stylesheets on cdn.uscloudtest.com. See the explanation here: https://stackoverflow.com/a/49160760
+    function canAccessStylesheet(sheet) {
+        try {
+            const cssRules = sheet.cssRules;
+        } catch {
+            console.log('Could not access a certain css stylesheet:');
+            console.log(sheet);
+            return false;
+        }
+        return true;
+    }
+
     // Remove nv-root, which has some user menu items
     for (let nvRoot of document.querySelectorAll('nv-root')) {
         nvRoot.remove();
@@ -367,7 +461,9 @@ async function getHtmlConverter (printMedia) {
 
     // Convert angular tag styles to class stlyes, remove @media screen and promote @media print to be for all media
     Array.prototype.slice.call(document.styleSheets).forEach((sheet) => {
-        if (!cleanCSSRule(sheet)) sheet.remove();
+        if (canAccessStylesheet(sheet)) {
+            if (!cleanCSSRule(sheet)) sheet.remove();
+        }
     });
 
     // Remove all elements that are hidden using display: none
@@ -390,6 +486,7 @@ async function getHtmlConverter (printMedia) {
     let globalStyle = '';
     for (let x = 0; x < document.styleSheets.length; x++) {
         let sheet = document.styleSheets[x];
+        if (!canAccessStylesheet(sheet)) continue;
         globalStyle += await convertCSSSheetToStyle(removeUnusedCSSRule(sheet));
     }
     Array.prototype.slice.call(document.getElementsByTagName('style')).forEach((item) => item.remove());
