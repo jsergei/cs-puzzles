@@ -448,23 +448,26 @@ async function convertIntoIxbrl(printMedia) {
         return true;
     }
 
-    // Remove nv-root, which has some user menu items
-    for (let nvRoot of document.querySelectorAll('nv-root')) {
-        nvRoot.remove();
-    }
-
-    // Remove comments, angular hidden nodes and convert angular tags to divs with classes
-    cleanNodes(document.documentElement);
-
-    // Remove scripts
-    Array.prototype.slice.call(document.getElementsByTagName('script')).forEach((item) => item.remove());
-
-    // Convert angular tag styles to class stlyes, remove @media screen and promote @media print to be for all media
-    Array.prototype.slice.call(document.styleSheets).forEach((sheet) => {
-        if (canAccessStylesheet(sheet)) {
-            if (!cleanCSSRule(sheet)) sheet.remove();
+    // Identify any remote cdn stylesheets and load them into the document so that all of their rules could
+    // be accessible for processing. cdn stylesheets include reusable styles and libraries, such as bootstrap
+    function injectRemoteStylesheets() {
+        const remoteStylesheets = [...document.styleSheets].filter(sheet => !canAccessStylesheet(sheet));
+        Promise.all(
+            remoteStylesheets.map(sheet => fetch(sheet.href).then(response => response.text()))
+        ).then(responses => {
+            for (let stylesheetText of responses) {
+                const styleTag = document.createElement('style');
+                styleTag.appendChild(document.createTextNode(stylesheetText));
+                document.head.appendChild(styleTag);
+            }
+        }, error => {
+            console.log('Could not load remote stylesheets. Investigate access headers and cookies');
+            console.error(error);
+        });
+        for (let sheet of remoteStylesheets) {
+            sheet.ownerNode.remove();
         }
-    });
+    }
 
     // Remove all elements that are hidden using display: none
     Array.prototype.slice.call(document.body.getElementsByTagName('*')).forEach((item) => {
@@ -472,6 +475,19 @@ async function convertIntoIxbrl(printMedia) {
         if (tagName !== 'style' && tagName !== 'link') {
             if (window.getComputedStyle(item).display === 'none') item.remove();
         }
+    });
+
+    injectRemoteStylesheets();
+
+    // Remove comments, angular hidden nodes and convert angular tags to divs with classes
+    cleanNodes(document.documentElement);
+
+    // Remove scripts
+    Array.prototype.slice.call(document.getElementsByTagName('script')).forEach((item) => item.remove());
+
+    // Convert angular tag styles to class styles, remove @media screen and promote @media print to be for all media
+    Array.prototype.slice.call(document.styleSheets).forEach((sheet) => {
+        if (!cleanCSSRule(sheet)) sheet.ownerNode.remove();
     });
 
     // Traverse the remaining elements tracking the used elements and classes, as well as inlining the images
@@ -486,7 +502,6 @@ async function convertIntoIxbrl(printMedia) {
     let globalStyle = '';
     for (let x = 0; x < document.styleSheets.length; x++) {
         let sheet = document.styleSheets[x];
-        if (!canAccessStylesheet(sheet)) continue;
         globalStyle += await convertCSSSheetToStyle(removeUnusedCSSRule(sheet));
     }
     Array.prototype.slice.call(document.getElementsByTagName('style')).forEach((item) => item.remove());
